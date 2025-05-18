@@ -2,6 +2,12 @@
 
 This project displays a stock chart for RAJA (Rukun Raharja Tbk.) using data from the Yahoo Finance API, with fallback to sample data when the API is unavailable.
 
+## Preview
+
+![RAJA Stock Chart Preview](https://tinypic.host/images/2025/05/18/Screenshot-2025-05-18-225241.png)
+
+*Screenshot of the RAJA stock chart showing candlestick view with volume indicator*
+
 ## Features
 
 - Interactive stock chart using lightweight-charts library
