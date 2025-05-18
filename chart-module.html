@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lightweight Charts ES Module Demo</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+        }
+        #chart-container {
+            width: 600px;
+            height: 400px;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>Lightweight Charts ES Module Demo</h1>
+    <div id="chart-container"></div>
+
+    <script type="module">
+        // Import from the ES module
+        import { createChart, LineSeries } from './node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.mjs';
+
+        // Create the chart
+        const chart = createChart(document.getElementById('chart-container'), { 
+            width: 600, 
+            height: 400,
+            layout: {
+                background: { color: '#ffffff' },
+                textColor: '#333333',
+            },
+            grid: {
+                vertLines: { color: '#f0f0f0' },
+                horzLines: { color: '#f0f0f0' },
+            },
+            timeScale: {
+                timeVisible: true,
+                borderColor: '#d1d1d1',
+            },
+        });
+
+        // Add a line series
+        const lineSeries = chart.addSeries(LineSeries);
+        
+        // Set the data
+        lineSeries.setData([
+            { time: '2019-04-11', value: 80.01 },
+            { time: '2019-04-12', value: 96.63 },
+            { time: '2019-04-13', value: 76.64 },
+            { time: '2019-04-14', value: 81.89 },
+            { time: '2019-04-15', value: 74.43 },
+            { time: '2019-04-16', value: 80.01 },
+            { time: '2019-04-17', value: 96.63 },
+            { time: '2019-04-18', value: 76.64 },
+            { time: '2019-04-19', value: 81.89 },
+            { time: '2019-04-20', value: 74.43 },
+        ]);
+
+        // Fit the chart to the data
+        chart.timeScale().fitContent();
+    </script>
+</body>
+</html>

@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAJA Stock Chart (Live API Data)</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .company-info {
+            text-align: center;
+            color: #666;
+            margin-bottom: 20px;
+        }
+        #chart-container {
+            width: 100%;
+            height: 500px;
+        }
+        .chart-controls {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .chart-type-btn {
+            padding: 8px 16px;
+            margin: 0 5px;
+            background-color: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+        .chart-type-btn:hover {
+            background-color: #e0e0e0;
+        }
+        .chart-type-btn.active {
+            background-color: #2196F3;
+            color: white;
+            border-color: #2196F3;
+        }
+        .summary {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .summary-item {
+            text-align: center;
+            padding: 10px;
+            min-width: 100px;
+        }
+        .summary-label {
+            font-size: 12px;
+            color: #666;
+        }
+        .summary-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .up {
+            color: #089981;
+        }
+        .down {
+            color: #f23645;
+        }
+        .neutral {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>RAJA Stock Chart (Live API Data)</h1>
+        <div class="company-info">Rukun Raharja Tbk. (IDX: RAJA)</div>
+
+        <div id="summary" class="summary"></div>
+
+        <div class="chart-controls">
+            <button id="candlestick-btn" class="chart-type-btn active">Candlestick</button>
+            <button id="line-btn" class="chart-type-btn">Line</button>
+        </div>
+
+        <div id="chart-container"></div>
+    </div>
+
+    <!-- Import from the standalone production version -->
+    <script src="node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
+    <script>
+        // API URL for RAJA stock data from Stockdio
+        const apiUrl = 'https://api.stockdio.com/data/financial/prices/v1/getIntradayPricesEx/?&from=2025-05-16&to=2025-05-16&app-key=242270827ABA430AB40409A2D54A5EA3&symbol=RAJA&stockExchange=idx&dfx_date=Hxir1z8UwoJ%2f8a9YZ7aFTROf6DBKoJNni%2fdvn1ZIVCX4KRmWCaQ0z1ecO2orKDhYAm0HZwQYKZdKidKHio52X8OwJYg7vrGnJeeXED0epR5yvJSq4B4%2fUsOx8spCf4tMkWhI9R7cPMg%2bOL6iTnAqSH80%2bwESBb8soJONvu9odTA%3d&compress=true';
+
+        // Loading indicator
+        const loadingIndicator = document.createElement('div');
+        loadingIndicator.style.position = 'absolute';
+        loadingIndicator.style.top = '50%';
+        loadingIndicator.style.left = '50%';
+        loadingIndicator.style.transform = 'translate(-50%, -50%)';
+        loadingIndicator.style.fontSize = '18px';
+        loadingIndicator.style.fontWeight = 'bold';
+        loadingIndicator.textContent = 'Loading RAJA stock data...';
+        document.querySelector('.container').appendChild(loadingIndicator);
+
+        // Initialize chart
+        const chartContainer = document.getElementById('chart-container');
+        const chart = LightweightCharts.createChart(chartContainer, {
+            width: chartContainer.clientWidth,
+            height: 500,
+            layout: {
+                background: { color: '#ffffff' },
+                textColor: '#333333',
+            },
+            grid: {
+                vertLines: { color: '#f0f0f0' },
+                horzLines: { color: '#f0f0f0' },
+            },
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: false,
+                borderColor: '#d1d1d1',
+                tickMarkFormatter: (time) => {
+                    const date = new Date(time * 1000); // Convert Unix timestamp to milliseconds
+                    const hours = date.getHours().toString().padStart(2, '0');
+                    const minutes = date.getMinutes().toString().padStart(2, '0');
+                    return `${hours}:${minutes}`;
+                },
+            },
+            rightPriceScale: {
+                borderColor: '#d1d1d1',
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+        });
+
+        // Variables to store our series
+        let mainSeries;
+        let volumeSeries;
+        let currentChartType = 'candlestick';
+        let processedData;
+
+        // Create volume series (this stays the same regardless of chart type)
+        volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
+            priceFormat: {
+                type: 'volume',
+            },
+            priceScaleId: '',
+            scaleMargins: {
+                top: 0.8,
+                bottom: 0,
+            },
+        });
+
+        // Function to create candlestick series
+        function createCandlestickSeries() {
+            if (mainSeries) {
+                chart.removeSeries(mainSeries);
+            }
+            mainSeries = chart.addSeries(LightweightCharts.CandlestickSeries);
+            if (processedData) {
+                mainSeries.setData(processedData.candlestickData);
+            }
+            currentChartType = 'candlestick';
+
+            // Update button states
+            document.getElementById('candlestick-btn').classList.add('active');
+            document.getElementById('line-btn').classList.remove('active');
+        }
+
+        // Function to create line series
+        function createLineSeries() {
+            if (mainSeries) {
+                chart.removeSeries(mainSeries);
+            }
+            mainSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                color: '#2196F3',
+                lineWidth: 2,
+                crosshairMarkerVisible: true,
+                crosshairMarkerRadius: 4,
+            });
+            if (processedData) {
+                // For line series, we need to convert OHLC data to line data
+                const lineData = processedData.candlestickData.map(item => ({
+                    time: item.time,
+                    value: item.close
+                }));
+                mainSeries.setData(lineData);
+            }
+            currentChartType = 'line';
+
+            // Update button states
+            document.getElementById('candlestick-btn').classList.remove('active');
+            document.getElementById('line-btn').classList.add('active');
+        }
+
+        // Add event listeners to buttons
+        document.getElementById('candlestick-btn').addEventListener('click', createCandlestickSeries);
+        document.getElementById('line-btn').addEventListener('click', createLineSeries);
+
+        // Start with candlestick chart by default
+        createCandlestickSeries();
+
+        // Function to format numbers with commas
+        function formatNumber(num) {
+            return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        }
+
+        // Function to update the summary section
+        function updateSummary(data) {
+            const summary = document.getElementById('summary');
+            const previousClose = data.data.previousClose;
+            const close = data.data.close;
+            const change = close - previousClose;
+            const changePercent = (change / previousClose) * 100;
+            const changeClass = change > 0 ? 'up' : (change < 0 ? 'down' : 'neutral');
+
+            summary.innerHTML = `
+                <div class="summary-item">
+                    <div class="summary-label">Open</div>
+                    <div class="summary-value">${data.data.open}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">High</div>
+                    <div class="summary-value">${data.data.high}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Low</div>
+                    <div class="summary-value">${data.data.low}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Close</div>
+                    <div class="summary-value">${data.data.close}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Change</div>
+                    <div class="summary-value ${changeClass}">
+                        ${change > 0 ? '+' : ''}${change} (${changePercent.toFixed(2)}%)
+                    </div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Volume</div>
+                    <div class="summary-value">${formatNumber(data.data.volume)}</div>
+                </div>
+            `;
+        }
+
+        // Function to process the data for the chart
+        function processData(data) {
+            const candlestickData = [];
+            const volumeData = [];
+
+            // Process the price data
+            data.data.prices.values.forEach(item => {
+                // Parse the ISO timestamp to a Date object
+                const timestamp = item[0];
+                const dateObj = new Date(timestamp);
+
+                // Convert to Unix timestamp (seconds since epoch)
+                const unixTime = Math.floor(dateObj.getTime() / 1000);
+
+                candlestickData.push({
+                    time: unixTime,
+                    open: item[1],
+                    high: item[2],
+                    low: item[3],
+                    close: item[4]
+                });
+
+                volumeData.push({
+                    time: unixTime,
+                    value: item[5], // Volume is at index 5
+                    color: item[4] >= item[1] ? 'rgba(8, 153, 129, 0.5)' : 'rgba(242, 54, 69, 0.5)'
+                });
+            });
+
+            return { candlestickData, volumeData };
+        }
+
+        // Fetch data from the API
+        fetch(apiUrl)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                // Remove loading indicator
+                document.querySelector('.container').removeChild(loadingIndicator);
+
+                // Update the summary
+                updateSummary(data);
+
+                // Process and set the data
+                processedData = processData(data);
+
+                // Set data for the current chart type
+                if (currentChartType === 'candlestick') {
+                    mainSeries.setData(processedData.candlestickData);
+                } else {
+                    const lineData = processedData.candlestickData.map(item => ({
+                        time: item.time,
+                        value: item.close
+                    }));
+                    mainSeries.setData(lineData);
+                }
+
+                // Set volume data
+                volumeSeries.setData(processedData.volumeData);
+
+                // Fit the chart to the data
+                chart.timeScale().fitContent();
+            })
+            .catch(error => {
+                // Remove loading indicator
+                if (document.querySelector('.container').contains(loadingIndicator)) {
+                    document.querySelector('.container').removeChild(loadingIndicator);
+                }
+
+                // Display error message
+                const errorMessage = document.createElement('div');
+                errorMessage.style.color = 'red';
+                errorMessage.style.textAlign = 'center';
+                errorMessage.style.padding = '20px';
+                errorMessage.style.fontSize = '16px';
+                errorMessage.innerHTML = `<strong>Error loading data:</strong> ${error.message}<br>Please try refreshing the page.`;
+                document.querySelector('.container').appendChild(errorMessage);
+
+                console.error('Error fetching data:', error);
+            });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            chart.applyOptions({ width: chartContainer.clientWidth });
+        });
+    </script>
+</body>
+</html>

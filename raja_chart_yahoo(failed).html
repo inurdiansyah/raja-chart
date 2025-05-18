@@ -1,0 +1,501 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAJA Stock Chart (Yahoo Finance via Heroku Proxy)</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: Arial, sans-serif;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .company-info {
+            text-align: center;
+            color: #666;
+            margin-bottom: 20px;
+        }
+        #chart-container {
+            width: 100%;
+            height: 500px;
+        }
+        .chart-controls {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .chart-type-btn {
+            padding: 8px 16px;
+            margin: 0 5px;
+            background-color: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+        .chart-type-btn:hover {
+            background-color: #e0e0e0;
+        }
+        .chart-type-btn.active {
+            background-color: #2196F3;
+            color: white;
+            border-color: #2196F3;
+        }
+        .summary {
+            display: flex;
+            justify-content: space-around;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+        .summary-item {
+            text-align: center;
+            padding: 10px;
+            min-width: 100px;
+        }
+        .summary-label {
+            font-size: 12px;
+            color: #666;
+        }
+        .summary-value {
+            font-size: 18px;
+            font-weight: bold;
+        }
+        .up {
+            color: #089981;
+        }
+        .down {
+            color: #f23645;
+        }
+        .neutral {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>RAJA Stock Chart (Yahoo Finance via Heroku Proxy)</h1>
+        <div class="company-info">Rukun Raharja Tbk. (IDX: RAJA.JK)</div>
+
+        <div id="summary" class="summary"></div>
+
+        <div class="chart-controls">
+            <button id="candlestick-btn" class="chart-type-btn active">Candlestick</button>
+            <button id="line-btn" class="chart-type-btn">Line</button>
+        </div>
+
+        <div id="chart-container"></div>
+    </div>
+
+    <!-- Import from the standalone production version -->
+    <script src="node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+
+    <script>
+        // API URL for RAJA stock data via Heroku proxy
+        // Replace 'YOUR-HEROKU-APP-NAME' with your actual Heroku app name after deployment
+        const proxyUrl = 'https://YOUR-HEROKU-APP-NAME.herokuapp.com/yahoo-finance';
+        const apiUrl = `${proxyUrl}?symbol=RAJA.JK&interval=1m&range=1d`;
+
+        // Loading indicator
+        const loadingIndicator = document.createElement('div');
+        loadingIndicator.style.position = 'absolute';
+        loadingIndicator.style.top = '50%';
+        loadingIndicator.style.left = '50%';
+        loadingIndicator.style.transform = 'translate(-50%, -50%)';
+        loadingIndicator.style.fontSize = '18px';
+        loadingIndicator.style.fontWeight = 'bold';
+        loadingIndicator.textContent = 'Loading RAJA stock data...';
+        document.querySelector('.container').appendChild(loadingIndicator);
+
+        // Initialize chart
+        const chartContainer = document.getElementById('chart-container');
+        const chart = LightweightCharts.createChart(chartContainer, {
+            width: chartContainer.clientWidth,
+            height: 500,
+            layout: {
+                background: { color: '#ffffff' },
+                textColor: '#333333',
+            },
+            grid: {
+                vertLines: { color: '#f0f0f0' },
+                horzLines: { color: '#f0f0f0' },
+            },
+            timeScale: {
+                timeVisible: true,
+                secondsVisible: false,
+                borderColor: '#d1d1d1',
+                tickMarkFormatter: (time) => {
+                    const date = new Date(time * 1000); // Convert Unix timestamp to milliseconds
+                    const hours = date.getHours().toString().padStart(2, '0');
+                    const minutes = date.getMinutes().toString().padStart(2, '0');
+                    return `${hours}:${minutes}`;
+                },
+            },
+            rightPriceScale: {
+                borderColor: '#d1d1d1',
+            },
+            crosshair: {
+                mode: LightweightCharts.CrosshairMode.Normal,
+            },
+        });
+
+        // Variables to store our series
+        let mainSeries;
+        let volumeSeries;
+        let currentChartType = 'candlestick';
+        let processedData;
+
+        // Create volume series
+        volumeSeries = chart.addSeries(LightweightCharts.HistogramSeries, {
+            priceFormat: {
+                type: 'volume',
+            },
+            priceScaleId: '',
+            scaleMargins: {
+                top: 0.8,
+                bottom: 0,
+            },
+        });
+
+        // Function to create candlestick series
+        function createCandlestickSeries() {
+            if (mainSeries) {
+                chart.removeSeries(mainSeries);
+            }
+            mainSeries = chart.addSeries(LightweightCharts.CandlestickSeries);
+            if (processedData) {
+                mainSeries.setData(processedData.candlestickData);
+            }
+            currentChartType = 'candlestick';
+
+            // Update button states
+            document.getElementById('candlestick-btn').classList.add('active');
+            document.getElementById('line-btn').classList.remove('active');
+        }
+
+        // Function to create line series
+        function createLineSeries() {
+            if (mainSeries) {
+                chart.removeSeries(mainSeries);
+            }
+            mainSeries = chart.addSeries(LightweightCharts.LineSeries, {
+                color: '#2196F3',
+                lineWidth: 2,
+                crosshairMarkerVisible: true,
+                crosshairMarkerRadius: 4,
+            });
+            if (processedData) {
+                mainSeries.setData(processedData.lineData);
+            }
+            currentChartType = 'line';
+
+            // Update button states
+            document.getElementById('candlestick-btn').classList.remove('active');
+            document.getElementById('line-btn').classList.add('active');
+        }
+
+        // Add event listeners to buttons
+        document.getElementById('candlestick-btn').addEventListener('click', createCandlestickSeries);
+        document.getElementById('line-btn').addEventListener('click', createLineSeries);
+
+        // Start with candlestick chart by default
+        createCandlestickSeries();
+
+        // Function to update the summary section
+        function updateSummary(data) {
+            const summary = document.getElementById('summary');
+
+            // Check if we have valid data
+            if (!data || !data.chart || !data.chart.result || data.chart.result.length === 0) {
+                summary.innerHTML = '<div class="summary-item">No data available</div>';
+                return;
+            }
+
+            const result = data.chart.result[0];
+            const meta = result.meta || {};
+            const quotes = result.indicators.quote[0] || {};
+
+            // Get the first and last valid close prices
+            const closes = quotes.close || [];
+            const opens = quotes.open || [];
+            const highs = quotes.high || [];
+            const lows = quotes.low || [];
+
+            // Filter out null values
+            const validCloses = closes.filter(price => price !== null && price !== undefined);
+            const validOpens = opens.filter(price => price !== null && price !== undefined);
+            const validHighs = highs.filter(price => price !== null && price !== undefined);
+            const validLows = lows.filter(price => price !== null && price !== undefined);
+
+            if (validCloses.length === 0) {
+                summary.innerHTML = '<div class="summary-item">No valid price data available</div>';
+                return;
+            }
+
+            // Get values for summary
+            const open = validOpens.length > 0 ? validOpens[0] : validCloses[0];
+            const close = validCloses[validCloses.length - 1];
+            const high = validHighs.length > 0 ? Math.max(...validHighs) : close;
+            const low = validLows.length > 0 ? Math.min(...validLows) : close;
+
+            // Calculate change
+            const previousClose = meta.previousClose || open;
+            const change = close - previousClose;
+            const changePercent = (change / previousClose) * 100;
+            const changeClass = change > 0 ? 'up' : (change < 0 ? 'down' : 'neutral');
+
+            // Format numbers to 2 decimal places
+            const formatPrice = (price) => price.toFixed(2);
+
+            summary.innerHTML = `
+                <div class="summary-item">
+                    <div class="summary-label">Open</div>
+                    <div class="summary-value">${formatPrice(open)}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">High</div>
+                    <div class="summary-value">${formatPrice(high)}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Low</div>
+                    <div class="summary-value">${formatPrice(low)}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Close</div>
+                    <div class="summary-value">${formatPrice(close)}</div>
+                </div>
+                <div class="summary-item">
+                    <div class="summary-label">Change</div>
+                    <div class="summary-value ${changeClass}">
+                        ${change > 0 ? '+' : ''}${formatPrice(change)} (${changePercent.toFixed(2)}%)
+                    </div>
+                </div>
+            `;
+        }
+
+        // Function to process the data for the chart
+        function processData(data) {
+            const candlestickData = [];
+            const lineData = [];
+            const volumeData = [];
+
+            // Check if we have valid data
+            if (!data || !data.chart || !data.chart.result || data.chart.result.length === 0) {
+                return { candlestickData, lineData, volumeData };
+            }
+
+            const result = data.chart.result[0];
+            const timestamps = result.timestamp || [];
+            const quotes = result.indicators.quote[0] || {};
+            const opens = quotes.open || [];
+            const highs = quotes.high || [];
+            const lows = quotes.low || [];
+            const closes = quotes.close || [];
+            const volumes = quotes.volume || [];
+
+            // Process the price data
+            for (let i = 0; i < timestamps.length; i++) {
+                // Skip entries with missing data
+                if (closes[i] === null || closes[i] === undefined) continue;
+
+                const timestamp = timestamps[i];
+                const open = opens[i] !== null ? opens[i] : closes[i];
+                const high = highs[i] !== null ? highs[i] : closes[i];
+                const low = lows[i] !== null ? lows[i] : closes[i];
+                const close = closes[i];
+                const volume = volumes[i] || 0;
+
+                // Add candlestick data
+                candlestickData.push({
+                    time: timestamp,
+                    open: open,
+                    high: high,
+                    low: low,
+                    close: close
+                });
+
+                // Add volume data
+                volumeData.push({
+                    time: timestamp,
+                    value: volume,
+                    color: close >= open ? 'rgba(8, 153, 129, 0.5)' : 'rgba(242, 54, 69, 0.5)'
+                });
+
+                // Add line data
+                lineData.push({
+                    time: timestamp,
+                    value: close
+                });
+            }
+
+            return { candlestickData, lineData, volumeData };
+        }
+
+        // Sample data to use as fallback if API fails
+        const sampleData = {
+            chart: {
+                result: [{
+                    meta: {
+                        currency: "IDR",
+                        symbol: "RAJA.JK",
+                        exchangeName: "JSX",
+                        instrumentType: "EQUITY",
+                        firstTradeDate: 1747386000,
+                        regularMarketTime: 1747411800,
+                        gmtoffset: 25200,
+                        timezone: "WIB",
+                        exchangeTimezoneName: "Asia/Jakarta",
+                        regularMarketPrice: 2150,
+                        chartPreviousClose: 2160,
+                        previousClose: 2160,
+                        scale: 0,
+                        priceHint: 2
+                    },
+                    timestamp: [
+                        1747386000, 1747386300, 1747386600, 1747386900, 1747387200, 1747387500, 1747387800,
+                        1747388100, 1747388400, 1747388700, 1747389000, 1747389300, 1747389600, 1747389900,
+                        1747390200, 1747390500, 1747390800, 1747391100, 1747391400, 1747391700, 1747392000,
+                        1747392300, 1747392600, 1747392900, 1747393200
+                    ],
+                    indicators: {
+                        quote: [{
+                            open: [
+                                2180, 2170, 2160, 2160, 2160, 2160, 2140, 2130, 2140, 2140, 2150, 2150, 2160,
+                                2150, 2150, 2170, 2160, 2160, 2170, 2170, 2160, 2150, 2150, 2160, 2150
+                            ],
+                            high: [
+                                2190, 2180, 2170, 2170, 2170, 2160, 2140, 2140, 2140, 2140, 2150, 2150, 2160,
+                                2150, 2150, 2170, 2160, 2160, 2170, 2170, 2160, 2150, 2150, 2160, 2150
+                            ],
+                            low: [
+                                2170, 2150, 2160, 2160, 2160, 2120, 2130, 2130, 2140, 2140, 2150, 2150, 2160,
+                                2150, 2150, 2170, 2160, 2160, 2170, 2170, 2160, 2150, 2150, 2160, 2150
+                            ],
+                            close: [
+                                2170, 2170, 2160, 2170, 2160, 2120, 2140, 2130, 2140, 2140, 2150, 2150, 2160,
+                                2150, 2150, 2170, 2160, 2160, 2170, 2170, 2160, 2150, 2150, 2160, 2150
+                            ],
+                            volume: [
+                                0, 745100, 5500, 105900, 125200, 93000, 102800, 7600, 63500, 65200, 15300,
+                                5000, 14400, 0, 98100, 8700, 3600, 10700, 7700, 20900, 5800, 368000, 42100,
+                                13600, 1092000
+                            ]
+                        }]
+                    }
+                }],
+                error: null
+            }
+        };
+
+        // Function to load and process data
+        function loadData(data) {
+            // Remove loading indicator
+            if (document.querySelector('.container').contains(loadingIndicator)) {
+                document.querySelector('.container').removeChild(loadingIndicator);
+            }
+
+            // Check if we have metadata about the data source
+            if (data._meta) {
+                // If this is sample data due to an error, show a warning
+                if (data._meta.source === 'sample') {
+                    const warningMessage = document.createElement('div');
+                    warningMessage.style.color = 'orange';
+                    warningMessage.style.textAlign = 'center';
+                    warningMessage.style.padding = '10px';
+                    warningMessage.style.fontSize = '14px';
+                    warningMessage.style.marginBottom = '10px';
+                    warningMessage.style.backgroundColor = '#fff3cd';
+                    warningMessage.style.border = '1px solid #ffeeba';
+                    warningMessage.style.borderRadius = '4px';
+
+                    let warningText = `<strong>Note:</strong> Using sample data because the API request failed.`;
+                    if (data._meta.message) {
+                        warningText += ` ${data._meta.message}`;
+                    }
+                    if (data._meta.error) {
+                        warningText += `<br><small>Error: ${data._meta.error}</small>`;
+                    }
+
+                    warningMessage.innerHTML = warningText;
+
+                    // Insert the warning before the chart
+                    const existingWarning = document.querySelector('.warning-message');
+                    if (existingWarning) {
+                        existingWarning.remove();
+                    }
+
+                    warningMessage.className = 'warning-message';
+                    document.querySelector('.container').insertBefore(warningMessage, document.getElementById('chart-container'));
+                }
+            }
+
+            // Update the summary
+            updateSummary(data);
+
+            // Process and set the data
+            processedData = processData(data);
+
+            // Set data for the current chart type
+            if (currentChartType === 'candlestick') {
+                mainSeries.setData(processedData.candlestickData);
+            } else {
+                mainSeries.setData(processedData.lineData);
+            }
+
+            // Set volume data
+            volumeSeries.setData(processedData.volumeData);
+
+            // Fit the chart to the data
+            chart.timeScale().fitContent();
+        }
+
+        // Fetch data from the API with fallback to sample data
+        fetch(apiUrl)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP error! Status: ${response.status}`);
+                }
+                return response.json();
+            })
+            .then(data => {
+                loadData(data);
+            })
+            .catch(error => {
+                console.error('Error fetching data from API:', error);
+
+                // Add metadata to sample data
+                const fallbackData = {
+                    ...sampleData,
+                    _meta: {
+                        source: 'sample',
+                        error: error.toString(),
+                        message: 'Using sample data because the API request failed',
+                        details: 'Make sure your Heroku proxy server is running and the URL is correctly configured.'
+                    }
+                };
+
+                // Use sample data as fallback
+                loadData(fallbackData);
+            });
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            chart.applyOptions({ width: chartContainer.clientWidth });
+        });
+    </script>
+</body>
+</html>
