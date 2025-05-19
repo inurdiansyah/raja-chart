@@ -143,6 +143,18 @@
                     return `${hours}:${minutes}`;
                 },
             },
+            localization: {
+                timeFormatter: (time) => {
+                    const date = new Date(time * 1000);
+                    // Use toLocaleTimeString to get the correct local time format
+                    return date.toLocaleTimeString('id-ID', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        hour12: false,
+                        timeZone: 'Asia/Jakarta' // Set to Indonesia timezone
+                    });
+                },
+            },
             rightPriceScale: {
                 borderColor: '#d1d1d1',
             },
@@ -174,7 +186,15 @@
             if (mainSeries) {
                 chart.removeSeries(mainSeries);
             }
-            mainSeries = chart.addSeries(LightweightCharts.CandlestickSeries);
+            mainSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+                priceFormat: {
+                    type: 'price',
+                    precision: 2,
+                    minMove: 0.01,
+                },
+                lastValueVisible: true,
+                priceLineVisible: true,
+            });
             if (processedData) {
                 mainSeries.setData(processedData.candlestickData);
             }
@@ -195,6 +215,13 @@
                 lineWidth: 2,
                 crosshairMarkerVisible: true,
                 crosshairMarkerRadius: 4,
+                priceFormat: {
+                    type: 'price',
+                    precision: 2,
+                    minMove: 0.01,
+                },
+                lastValueVisible: true,
+                priceLineVisible: true,
             });
             if (processedData) {
                 mainSeries.setData(processedData.lineData);
@@ -287,7 +314,8 @@
                 // Skip entries with Close value of 0
                 if (item.Close === 0) return;
 
-                // Convert timestamp to seconds
+                // Convert timestamp to seconds and ensure it's in the correct timezone
+                // The Date value from the API is in milliseconds
                 const timestamp = Math.floor(item.Date / 1000);
 
                 // Check if we have OHLC data (from Yahoo Finance)
@@ -471,6 +499,78 @@
                 // Use sample data as fallback
                 loadData(fallbackData);
             });
+
+        // Create and add a custom tooltip element
+        const toolTip = document.createElement('div');
+        toolTip.className = 'floating-tooltip';
+        toolTip.style.position = 'absolute';
+        toolTip.style.display = 'none';
+        toolTip.style.padding = '8px';
+        toolTip.style.backgroundColor = 'rgba(255, 255, 255, 0.9)';
+        toolTip.style.border = '1px solid #d1d1d1';
+        toolTip.style.borderRadius = '4px';
+        toolTip.style.boxShadow = '0 2px 5px rgba(0, 0, 0, 0.1)';
+        toolTip.style.fontSize = '12px';
+        toolTip.style.pointerEvents = 'none';
+        toolTip.style.zIndex = '1000';
+        document.body.appendChild(toolTip);
+
+        // Subscribe to crosshair move to update the tooltip
+        chart.subscribeCrosshairMove(param => {
+            if (
+                !param.point ||
+                !param.time ||
+                param.point.x < 0 ||
+                param.point.x > chartContainer.clientWidth ||
+                param.point.y < 0 ||
+                param.point.y > chartContainer.clientHeight
+            ) {
+                toolTip.style.display = 'none';
+                return;
+            }
+
+            const dateStr = new Date(param.time * 1000).toLocaleTimeString('id-ID', {
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false,
+                timeZone: 'Asia/Jakarta'
+            });
+
+            let price = '';
+            if (param.seriesData.get(mainSeries)) {
+                const data = param.seriesData.get(mainSeries);
+                if (currentChartType === 'candlestick') {
+                    price = `<div>O: ${data.open.toFixed(2)}</div>
+                             <div>H: ${data.high.toFixed(2)}</div>
+                             <div>L: ${data.low.toFixed(2)}</div>
+                             <div>C: ${data.close.toFixed(2)}</div>`;
+                } else {
+                    price = `<div>Price: ${data.value.toFixed(2)}</div>`;
+                }
+            }
+
+            let volume = '';
+            if (param.seriesData.get(volumeSeries)) {
+                const volData = param.seriesData.get(volumeSeries);
+                volume = `<div>Volume: ${volData.value.toLocaleString()}</div>`;
+            }
+
+            toolTip.innerHTML = `<div>Time: ${dateStr}</div>${price}${volume}`;
+            toolTip.style.display = 'block';
+
+            const y = param.point.y;
+            let left = param.point.x + 50;
+            if (left > chartContainer.clientWidth - 150) {
+                left = param.point.x - 150;
+            }
+
+            const container = chartContainer.getBoundingClientRect();
+            const tooltipLeft = container.left + left;
+            const tooltipTop = container.top + y - 50;
+
+            toolTip.style.left = tooltipLeft + 'px';
+            toolTip.style.top = tooltipTop + 'px';
+        });
 
         // Handle window resize
         window.addEventListener('resize', () => {
